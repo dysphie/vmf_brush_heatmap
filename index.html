@@ -226,11 +226,11 @@ function rebuild(){
     mesh.setColorAt(i,col);
   });
   scene.add(mesh);
-  const keep=selCell&&cellList.find(c=>c.ix===selCell.ix&&c.iy===selCell.iy&&c.iz===selCell.iz);
+  const keep=selCell&&cellList.find(c=>c.ix===selCell.ix&&c.iy===selCell.iy&&(selFlat!==flat||flat||c.iz===selCell.iz));
   showSel(keep||null);
 }
 function showSel(c){
-  selCell=c; selGroup.children.slice().forEach(o=>{selGroup.remove(o); o.geometry.dispose(); o.material.dispose();});
+  selCell=c; selFlat=flat; selGroup.children.slice().forEach(o=>{selGroup.remove(o); o.geometry.dispose(); o.material.dispose();});
   if(!c){ selList=[]; $('sel').textContent='Click a cell in the view.'; return; }
   const s=curSize, fz=Math.floor;
   selList=shown.filter(b=>fz(b.c[0]/s)===c.ix&&fz(b.c[1]/s)===c.iy&&(flat||fz(b.c[2]/s)===c.iz)).sort((a,b)=>a.dim-b.dim);
@@ -249,6 +249,7 @@ function setView(v){
   controls.target.copy(ctr);
   if(v) camera.position.set(ctr.x,ctr.y-1,ctr.z+d*.95); else camera.position.set(ctr.x+d*.7,ctr.y-d*.7,ctr.z+d*.5);
   controls.update(); rebuild();
+  if(selCell) flyTo(new THREE.Vector3((selCell.ix+.5)*curSize,(selCell.iy+.5)*curSize,flat?izMin*curSize:(selCell.iz+.5)*curSize),curSize);
 }
 $('v3').onclick=()=>setView(false); $('v2').onclick=()=>setView(true);
 const ray=new THREE.Raycaster(), mouse=new THREE.Vector2();
@@ -264,7 +265,7 @@ canvas.addEventListener('pointermove',e=>{
   t.textContent=`${c.n} brushes · x ${c.ix*s}..${(c.ix+1)*s}, y ${c.iy*s}..${(c.iy+1)*s}${flat?'':`, z ${c.iz*s}..${(c.iz+1)*s}`}`;
 });
 canvas.addEventListener('pointerleave',()=>$('tip').style.display='none');
-let tw=null;
+let tw=null, selFlat=false;
 controls.addEventListener('start',()=>tw=null);
 function flyTo(t,size){
   const dir=view2D?new THREE.Vector3(0,-.001,1):camera.position.clone().sub(controls.target).normalize();
