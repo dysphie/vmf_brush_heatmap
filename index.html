@@ -61,12 +61,13 @@ tr.click:hover{background:#000080;color:#fff}
   <label>Min cell count <input type="range" id="fmin" min="1" max="50" value="1"><span id="fminv">1</span></label>
   <label>Opacity <input type="range" id="fop" min="10" max="100" value="55"></label>
   <label><span>Log color scale</span><input type="checkbox" id="flog" checked></label>
+  <label>Render <select id="fvm"><option value="h">Heatmap</option><option value="t">Textured</option><option value="b">Both</option></select></label>
   <label>Color by <select id="fcol"><option value="d">Density</option><option value="c">Entity class</option></select></label>
   <label>Z layer <input type="range" id="fz" min="0" max="0" value="0"><span id="fzv">All</span></label>
   <label><span>Outline all brushes</span><input type="checkbox" id="fol"></label>
   <div style="display:flex;gap:6px;margin-top:6px"><button class="mini" id="v3">3D view</button><button class="mini" id="v2">Top-down view</button></div>
 
-  <h2>Selected cell <button class="mini" id="selcopy" style="float:right">Copy IDs</button></h2>
+  <h2>Selected cell <button class="mini" id="selcopy" style="float:right">Copy IDs</button><button class="mini" id="selcoord" style="float:right;margin-right:6px">Copy coords</button></h2>
   <div id="sel" class="mute">Click a cell in the view.</div>
   <h2>Hottest cells</h2>
   <table id="cells"></table>
@@ -107,15 +108,16 @@ function collect(block,cls,isWorld,hidden,out){
   }
 }
 function toBrush(s,cls,isWorld,hidden){
-  const mn=[1e9,1e9,1e9], mx=[-1e9,-1e9,-1e9]; let sides=0;
+  const mn=[1e9,1e9,1e9], mx=[-1e9,-1e9,-1e9]; let sides=0; const pl=[];
   for(const sd of s.ch){
     if(sd.name!=='side') continue; sides++;
     const n=(sd.kv.plane||'').match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi);
     if(!n||n.length<9) continue;
+    pl.push(n.slice(0,9).map(Number));
     for(let i=0;i<9;i++){ const v=+n[i], a=i%3; if(v<mn[a])mn[a]=v; if(v>mx[a])mx[a]=v; }
   }
   const c=mn.map((v,i)=>(v+mx[i])/2), dim=Math.max(mx[0]-mn[0],mx[1]-mn[1],mx[2]-mn[2]);
-  return {id:s.kv.id,cls,isWorld,hidden,sides,mn,mx,c,dim};
+  return {id:s.kv.id,cls,isWorld,hidden,sides,pl,mn,mx,c,dim};
 }
 function load(text){
   const root=parseKV(text), out=[];
@@ -153,8 +155,11 @@ function resize(){const v=$('view'); renderer.setSize(v.clientWidth,v.clientHeig
 addEventListener('resize',resize); resize();
 (function loop(){requestAnimationFrame(loop); controls.update(); renderer.render(scene,camera);})();
 
-let cellList=[], shown=[], selCell=null, selList=[], flat=false, curSize=256, izMin=0, view2D=false, olLines=null;
+let cellList=[], shown=[], selCell=null, selList=[], flat=false, curSize=256, izMin=0, view2D=false, olLines=null, geoMesh=null;
 const selGroup=new THREE.Group(); scene.add(selGroup);
+scene.add(new THREE.AmbientLight(0xffffff,.55));
+const dl1=new THREE.DirectionalLight(0xffffff,.7); dl1.position.set(1,-2,3); scene.add(dl1);
+const dl2=new THREE.DirectionalLight(0xffffff,.3); dl2.position.set(-2,1,1); scene.add(dl2);
 const esc=s=>String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;');
 const hue=s=>{let h=0; for(const ch of s) h=(h*31+ch.charCodeAt(0))%360; return h;};
 function clear(o){ if(o){scene.remove(o); o.geometry.dispose(); o.material.dispose();} }
@@ -181,8 +186,51 @@ function pass(b){
   if(hidden.has(b.cls)) return false;
   const md=+$('fmax').value; return !(md>0&&b.dim>md);
 }
+function brushGeo(b){
+  if(b.poly) return b.poly;
+  const m=new THREE.Vector3(), V=[];
+  for(const a of b.pl){ for(let i=0;i<9;i+=3){ const v=new THREE.Vector3(a[i],a[i+1],a[i+2]); V.push(v); m.add(v); } }
+  m.divideScalar(V.length||1);
+  const P=[];
+  for(let i=0;i<V.length;i+=3){
+    const n=new THREE.Vector3().subVectors(V[i+2],V[i]).cross(new THREE.Vector3().subVectors(V[i+1],V[i])).normalize();
+    if(n.lengthSq()<.5) continue;
+    if(n.dot(m.clone().sub(V[i]))>0) n.negate();
+    P.push({n,d:n.dot(V[i])});
+  }
+  const out=[];
+  P.forEach((pi,i)=>{
+    const u=Math.abs(pi.n.x)<.9?new THREE.Vector3(1,0,0):new THREE.Vector3(0,1,0);
+    const t1=u.clone().cross(pi.n).normalize(), t2=pi.n.clone().cross(t1), c0=pi.n.clone().multiplyScalar(pi.d), R=1e5;
+    let poly=[[-1,-1],[1,-1],[1,1],[-1,1]].map(([x,y])=>c0.clone().addScaledVector(t1,x*R).addScaledVector(t2,y*R));
+    for(let j=0;j<P.length&&poly.length>2;j++){
+      if(j===i) continue;
+      const pj=P[j], nx=[];
+      for(let k=0;k<poly.length;k++){
+        const a=poly[k], c=poly[(k+1)%poly.length], da=pj.n.dot(a)-pj.d, dc=pj.n.dot(c)-pj.d;
+        if(da<=.01) nx.push(a);
+        if((da<-.01&&dc>.01)||(da>.01&&dc<-.01)) nx.push(a.clone().lerp(c,da/(da-dc)));
+      }
+      poly=nx;
+    }
+    if(poly.length>2) out.push(poly);
+  });
+  return b.poly=out;
+}
+function buildGeo(list){
+  const pos=[], col=[];
+  for(const b of list){
+    const g=b.isWorld?.72:.55;
+    for(const poly of brushGeo(b)) for(let k=1;k<poly.length-1;k++) for(const v of [poly[0],poly[k],poly[k+1]]){ pos.push(v.x,v.y,v.z); col.push(g,g,g); }
+  }
+  const geo=new THREE.BufferGeometry();
+  geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
+  geo.setAttribute('color',new THREE.Float32BufferAttribute(col,3));
+  geo.computeVertexNormals();
+  return new THREE.Mesh(geo,new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide}));
+}
 function rebuild(){
-  clear(mesh); mesh=null; clear(olLines); olLines=null;
+  clear(mesh); mesh=null; clear(olLines); olLines=null; clear(geoMesh); geoMesh=null;
   const size=curSize=+$('cell').value, minc=+$('fmin').value, zs=+$('fz').value, dens=$('fcol').value==='d', lg=$('flog').checked;
   let zlo=1e9, zhi=-1e9; for(const b of brushes){const z=Math.floor(b.c[2]/size); if(z<zlo)zlo=z; if(z>zhi)zhi=z;}
   const nz=brushes.length?zhi-zlo+1:0; izMin=nz?zlo:0; $('fz').max=nz; const zsel=Math.min(zs,nz);
@@ -201,6 +249,7 @@ function rebuild(){
   $('out').textContent=brushes.length?`${tot} brushes shown in ${cellList.length} cells`:'Load a VMF to begin.';
   $('cells').innerHTML=cellList.slice(0,15).map((c,i)=>`<tr class="click" data-i="${i}"><td>(${c.ix*size}, ${c.iy*size}${flat?'':', '+c.iz*size})</td><td>${c.n}</td></tr>`).join('');
   $('grad').style.display=dens?'':'none';
+  $('legend').style.display=$('fvm').value==='t'?'none':'';
   $('lt').textContent=dens?(lg?'brushes per cell (log scale)':'brushes per cell'):'color = dominant class in cell';
   $('lmin').textContent=dens&&cellList.length?cellList[cellList.length-1].n:''; $('lmax').textContent=dens&&cellList.length?cellList[0].n:'';
   buildGrid(size);
@@ -224,6 +273,13 @@ function rebuild(){
     mesh.setColorAt(i,col);
   });
   scene.add(mesh);
+  const vm=$('fvm').value;
+  mesh.visible=vm!=='t';
+  if(vm!=='h'){
+    const keys=new Set(cellList.map(c=>c.ix+','+c.iy+','+c.iz));
+    geoMesh=buildGeo(shown.filter(b=>keys.has(Math.floor(b.c[0]/size)+','+Math.floor(b.c[1]/size)+','+(flat?0:Math.floor(b.c[2]/size)))));
+    scene.add(geoMesh);
+  }
   const keep=selCell&&cellList.find(c=>c.ix===selCell.ix&&c.iy===selCell.iy&&(selFlat!==flat||flat||c.iz===selCell.iz));
   showSel(keep||null);
 }
@@ -236,10 +292,16 @@ function showSel(c){
   selGroup.add(lines([box],0xffffff,1)); if(selList.length) selGroup.add(lines(selList,0xffd43b,1));
   $('sel').innerHTML=`<div>Cell (${c.ix*s}, ${c.iy*s}${flat?'':', '+c.iz*s}) · ${selList.length} brushes</div><div style="max-height:220px;overflow:auto;margin-top:4px"><table><tr><td><b>Brush ID</b></td><td><b>Class</b></td><td><b>Size</b></td></tr>${selList.slice(0,300).map(b=>`<tr><td>${b.id}</td><td>${esc(b.cls)}</td><td>${Math.round(b.dim)}u</td></tr>`).join('')}</table></div>${selList.length>300?'<div>…more, use Copy IDs</div>':''}`;
 }
-$('selcopy').onclick=()=>{
-  const t=selList.map(b=>b.id).join(' '); if(!t) return;
-  const done=()=>{$('selcopy').textContent='Copied'; setTimeout(()=>$('selcopy').textContent='Copy IDs',1200);};
-  (navigator.clipboard?navigator.clipboard.writeText(t).then(done):Promise.reject()).catch(()=>prompt('Brush IDs (Ctrl+C):',t));
+function copyText(btn,label,t,title){
+  if(!t) return;
+  const done=()=>{btn.textContent='Copied'; setTimeout(()=>btn.textContent=label,1200);};
+  (navigator.clipboard?navigator.clipboard.writeText(t).then(done):Promise.reject()).catch(()=>prompt(title,t));
+}
+$('selcopy').onclick=()=>copyText($('selcopy'),'Copy IDs',selList.map(b=>b.id).join(' '),'Brush IDs (Ctrl+C):');
+$('selcoord').onclick=()=>{
+  if(!selList.length) return;
+  const n=selList.length, a=[0,1,2].map(i=>Math.round(selList.reduce((s,b)=>s+b.c[i],0)/n));
+  copyText($('selcoord'),'Copy coords','setpos '+a.join(' ')+'; setang 45 0 0','Console command (Ctrl+C):');
 };
 function setView(v){
   view2D=v; controls.enableRotate=!v;
@@ -284,7 +346,7 @@ $('cells').addEventListener('click',e=>{
   const t=new THREE.Vector3((c.ix+.5)*s,(c.iy+.5)*s,flat?izMin*s:(c.iz+.5)*s);
   flyTo(t,s); showSel(c);
 });
-['cell','fw','fe','fmax','fmin','fop','flog','fcol','fz','fol'].forEach(id=>$(id).addEventListener('input',()=>{ if(id==='fop'&&mesh) mesh.material.opacity=+$('fop').value/100; else rebuild(); }));
+['cell','fw','fe','fmax','fmin','fop','flog','fcol','fvm','fz','fol'].forEach(id=>$(id).addEventListener('input',()=>{ if(id==='fop'&&mesh) mesh.material.opacity=+$('fop').value/100; else rebuild(); }));
 
 $('classes').addEventListener('change',e=>{const i=e.target.dataset.i; if(i===undefined) return; const k=clsKeys[+i][0]; if(e.target.checked) hidden.delete(k); else hidden.add(k); rebuild();});
 $('classes').addEventListener('click',e=>{const i=e.target.dataset.only; if(i===undefined) return; e.preventDefault(); hidden=new Set(clsKeys.map(x=>x[0])); hidden.delete(clsKeys[+i][0]); stats(); rebuild();});
