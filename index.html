@@ -155,7 +155,7 @@ function resize(){const v=$('view'); renderer.setSize(v.clientWidth,v.clientHeig
 addEventListener('resize',resize); resize();
 (function loop(){requestAnimationFrame(loop); controls.update(); renderer.render(scene,camera);})();
 
-let cellList=[], shown=[], selCell=null, selList=[], flat=false, curSize=256, izMin=0, view2D=false, olLines=null, geoMesh=null;
+let cellList=[], shown=[], selCell=null, selList=[], flat=false, curSize=256, izMin=0, view2D=false, olLines=null, geoMesh=null, trigMesh=null;
 const selGroup=new THREE.Group(); scene.add(selGroup);
 scene.add(new THREE.AmbientLight(0xffffff,.55));
 const dl1=new THREE.DirectionalLight(0xffffff,.7); dl1.position.set(1,-2,3); scene.add(dl1);
@@ -217,7 +217,7 @@ function brushGeo(b){
   });
   return b.poly=out;
 }
-function buildGeo(list){
+function buildGeo(list,trig){
   const pos=[], col=[];
   for(const b of list){
     const g=b.isWorld?.72:.55;
@@ -227,10 +227,10 @@ function buildGeo(list){
   geo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));
   geo.setAttribute('color',new THREE.Float32BufferAttribute(col,3));
   geo.computeVertexNormals();
-  return new THREE.Mesh(geo,new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide}));
+  return new THREE.Mesh(geo,trig?new THREE.MeshLambertMaterial({color:0xff8c1a,transparent:true,opacity:.4,depthWrite:false,side:THREE.DoubleSide}):new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide}));
 }
 function rebuild(){
-  clear(mesh); mesh=null; clear(olLines); olLines=null; clear(geoMesh); geoMesh=null;
+  clear(mesh); mesh=null; clear(olLines); olLines=null; clear(geoMesh); geoMesh=null; clear(trigMesh); trigMesh=null;
   const size=curSize=+$('cell').value, minc=+$('fmin').value, zs=+$('fz').value, dens=$('fcol').value==='d', lg=$('flog').checked;
   let zlo=1e9, zhi=-1e9; for(const b of brushes){const z=Math.floor(b.c[2]/size); if(z<zlo)zlo=z; if(z>zhi)zhi=z;}
   const nz=brushes.length?zhi-zlo+1:0; izMin=nz?zlo:0; $('fz').max=nz; const zsel=Math.min(zs,nz);
@@ -275,21 +275,42 @@ function rebuild(){
   scene.add(mesh);
   const vm=$('fvm').value;
   mesh.visible=vm!=='t';
-  if(vm!=='h'){
-    const keys=new Set(cellList.map(c=>c.ix+','+c.iy+','+c.iz));
-    geoMesh=buildGeo(shown.filter(b=>keys.has(Math.floor(b.c[0]/size)+','+Math.floor(b.c[1]/size)+','+(flat?0:Math.floor(b.c[2]/size)))));
-    scene.add(geoMesh);
-  }
   const keep=selCell&&cellList.find(c=>c.ix===selCell.ix&&c.iy===selCell.iy&&(selFlat!==flat||flat||c.iz===selCell.iz));
   showSel(keep||null);
 }
+function applyIso(){
+  if(olLines) olLines.visible=!selCell;
+  if(!mesh) return;
+  const s=curSize, m=new THREE.Matrix4(), q=new THREE.Quaternion(), one=new THREE.Vector3(1,1,1), tiny=new THREE.Vector3(1e-4,1e-4,1e-4);
+  cellList.forEach((c,i)=>{
+    m.compose(new THREE.Vector3((c.ix+.5)*s,(c.iy+.5)*s,flat?izMin*s:(c.iz+.5)*s),q,(!selCell||c===selCell)?one:tiny);
+    mesh.setMatrixAt(i,m);
+  });
+  mesh.instanceMatrix.needsUpdate=true;
+}
+function rebuildGeo(){
+  clear(geoMesh); geoMesh=null; clear(trigMesh); trigMesh=null;
+  if($('fvm').value==='h'||!cellList.length) return;
+  const s=curSize;
+  let vis;
+  if(selCell) vis=selList;
+  else {
+    const keys=new Set(cellList.map(c=>c.ix+','+c.iy+','+c.iz));
+    vis=shown.filter(b=>keys.has(Math.floor(b.c[0]/s)+','+Math.floor(b.c[1]/s)+','+(flat?0:Math.floor(b.c[2]/s))));
+  }
+  const isTrig=b=>/^trigger_/i.test(b.cls), tl=vis.filter(isTrig);
+  geoMesh=buildGeo(vis.filter(b=>!isTrig(b)));
+  scene.add(geoMesh);
+  if(tl.length){ trigMesh=buildGeo(tl,true); scene.add(trigMesh); }
+}
 function showSel(c){
   selCell=c; selFlat=flat; selGroup.children.slice().forEach(o=>{selGroup.remove(o); o.geometry.dispose(); o.material.dispose();});
-  if(!c){ selList=[]; $('sel').textContent='Click a cell in the view.'; return; }
+  if(!c){ selList=[]; $('sel').textContent='Click a cell in the view.'; applyIso(); rebuildGeo(); return; }
   const s=curSize, fz=Math.floor;
   selList=shown.filter(b=>fz(b.c[0]/s)===c.ix&&fz(b.c[1]/s)===c.iy&&(flat||fz(b.c[2]/s)===c.iz)).sort((a,b)=>a.dim-b.dim);
   const z0=flat?izMin*s:c.iz*s, box={mn:[c.ix*s,c.iy*s,z0],mx:[(c.ix+1)*s,(c.iy+1)*s,flat?z0+s*.1:z0+s]};
   selGroup.add(lines([box],0xffffff,1)); if(selList.length) selGroup.add(lines(selList,0xffd43b,1));
+  applyIso(); rebuildGeo();
   $('sel').innerHTML=`<div>Cell (${c.ix*s}, ${c.iy*s}${flat?'':', '+c.iz*s}) · ${selList.length} brushes</div><div style="max-height:220px;overflow:auto;margin-top:4px"><table><tr><td><b>Brush ID</b></td><td><b>Class</b></td><td><b>Size</b></td></tr>${selList.slice(0,300).map(b=>`<tr><td>${b.id}</td><td>${esc(b.cls)}</td><td>${Math.round(b.dim)}u</td></tr>`).join('')}</table></div>${selList.length>300?'<div>…more, use Copy IDs</div>':''}`;
 }
 function copyText(btn,label,t,title){
@@ -340,7 +361,12 @@ canvas.addEventListener('dblclick',e=>{
 });
 let down=null;
 canvas.addEventListener('pointerdown',e=>down=[e.clientX,e.clientY]);
-canvas.addEventListener('pointerup',e=>{ if(!down||Math.hypot(e.clientX-down[0],e.clientY-down[1])>4) return; const i=pick(e); showSel(i<0?null:cellList[i]); });
+canvas.addEventListener('pointerup',e=>{
+  if(!down||Math.hypot(e.clientX-down[0],e.clientY-down[1])>4) return;
+  let i=pick(e);
+  if(i<0&&selCell){ const g=[geoMesh,trigMesh].filter(Boolean); if(g.length&&ray.intersectObjects(g).length) i=cellList.indexOf(selCell); }
+  showSel(i<0?null:cellList[i]);
+});
 $('cells').addEventListener('click',e=>{
   const tr=e.target.closest('tr'); if(!tr) return; const c=cellList[+tr.dataset.i], s=curSize;
   const t=new THREE.Vector3((c.ix+.5)*s,(c.iy+.5)*s,flat?izMin*s:(c.iz+.5)*s);
