@@ -9,7 +9,7 @@
 *{box-sizing:border-box}
 html,body{height:100%;margin:0}
 body{background:#008080;color:#000;font:11px/1.35 Tahoma,"MS Sans Serif",Arial,sans-serif;display:flex;gap:4px;padding:4px}
-#side{width:340px;max-width:45%;background:#c0c0c0;overflow-y:auto;padding:3px 0 8px;box-shadow:inset -1px -1px #0a0a0a,inset 1px 1px #dfdfdf,inset -2px -2px #808080,inset 2px 2px #fff}
+#side{width:340px;max-width:45%;background:#c0c0c0;overflow-y:auto;overflow-x:hidden;padding:3px 0 8px;box-shadow:inset -1px -1px #0a0a0a,inset 1px 1px #dfdfdf,inset -2px -2px #808080,inset 2px 2px #fff}
 #side>*:not(.title-bar){margin-left:8px;margin-right:8px}
 .title-bar{background:linear-gradient(90deg,#000080,#1084d0);color:#fff;font-weight:bold;padding:3px 4px;margin:0 3px 8px;position:sticky;top:0;z-index:2}
 #view{flex:1;position:relative;min-width:0;background:#000;border:2px solid;border-color:#808080 #fff #fff #808080}
@@ -20,7 +20,7 @@ input[type=number],select,#drop,#clswrap,#cells,#sel>div:nth-child(2),.bar{box-s
 input[type=number],select{width:90px;height:21px;padding:3px 4px;font:inherit;color:#000}
 input[type=checkbox]{appearance:none;-webkit-appearance:none;width:13px;height:13px;margin:0;flex:none;box-shadow:inset -1px -1px #fff,inset 1px 1px #808080,inset -2px -2px #dfdfdf,inset 2px 2px #0a0a0a;background:#fff}
 input[type=checkbox]:checked{background:#fff url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='9' height='9'%3E%3Cpath d='M1.5 4.5 3.5 6.5 7.5 2' stroke='%23000' stroke-width='1.8' fill='none'/%3E%3C/svg%3E") center no-repeat}
-input[type=range]{width:150px;accent-color:#000080}
+input[type=range]{flex:1;min-width:0;accent-color:#000080}
 .mini{background:#c0c0c0;color:#000;border:none;border-radius:0;min-width:75px;min-height:23px;padding:0 10px;font:inherit;cursor:pointer;box-shadow:inset -1px -1px #0a0a0a,inset 1px 1px #fff,inset -2px -2px #808080,inset 2px 2px #dfdfdf}
 .mini:active{box-shadow:inset -1px -1px #fff,inset 1px 1px #0a0a0a,inset -2px -2px #dfdfdf,inset 2px 2px #808080}
 #drop{padding:14px;text-align:center;color:#000;cursor:pointer}
@@ -28,6 +28,7 @@ input[type=range]{width:150px;accent-color:#000080}
 .bar{height:14px;margin:4px 8px;padding:2px}
 .bar i{display:block;height:100%}
 table{width:100%;border-collapse:collapse;background:#fff;color:#000}
+#side>table{width:calc(100% - 16px)}
 td{padding:2px 4px}
 td:last-child{text-align:right;font-variant-numeric:tabular-nums}
 tr.click{cursor:pointer}
