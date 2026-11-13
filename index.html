@@ -56,7 +56,7 @@ tr.click:hover{background:#000080;color:#fff}
     <select id="cell"><option>64</option><option>128</option><option selected>256</option><option>512</option><option>1024</option></select></label>
   <label><span>World brushes</span><input type="checkbox" id="fw" checked></label>
   <label><span>Entity brushes (func_*)</span><input type="checkbox" id="fe" checked></label>
-  <label><span>Displacements only</span><input type="checkbox" id="fd"></label>
+  
   <label>Max brush dimension <input type="number" id="fmax" value="0" min="0" title="0 = off"></label>
   <label>Min cell count <input type="range" id="fmin" min="1" max="50" value="1"><span id="fminv">1</span></label>
   <label>Opacity <input type="range" id="fop" min="10" max="100" value="55"></label>
@@ -102,21 +102,20 @@ function parseKV(text){
 }
 function collect(block,cls,isWorld,hidden,out){
   for(const c of block.ch){
-    if(c.name==='solid') out.push(toBrush(c,cls,isWorld,hidden));
+    if(c.name==='solid'){ if(!c.ch.some(sd=>sd.ch.some(x=>x.name==='dispinfo'))) out.push(toBrush(c,cls,isWorld,hidden)); }
     else if(c.name==='hidden') collect(c,cls,isWorld,true,out);
   }
 }
 function toBrush(s,cls,isWorld,hidden){
-  const mn=[1e9,1e9,1e9], mx=[-1e9,-1e9,-1e9]; let sides=0, disp=false;
+  const mn=[1e9,1e9,1e9], mx=[-1e9,-1e9,-1e9]; let sides=0;
   for(const sd of s.ch){
     if(sd.name!=='side') continue; sides++;
-    if(sd.ch.some(x=>x.name==='dispinfo')) disp=true;
     const n=(sd.kv.plane||'').match(/-?\d+(?:\.\d+)?(?:e[+-]?\d+)?/gi);
     if(!n||n.length<9) continue;
     for(let i=0;i<9;i++){ const v=+n[i], a=i%3; if(v<mn[a])mn[a]=v; if(v>mx[a])mx[a]=v; }
   }
   const c=mn.map((v,i)=>(v+mx[i])/2), dim=Math.max(mx[0]-mn[0],mx[1]-mn[1],mx[2]-mn[2]);
-  return {id:s.kv.id,cls,isWorld,hidden,sides,disp,mn,mx,c,dim};
+  return {id:s.kv.id,cls,isWorld,hidden,sides,mn,mx,c,dim};
 }
 function load(text){
   const root=parseKV(text), out=[];
@@ -130,9 +129,9 @@ function load(text){
 
 function stats(){
   const n=brushes.length, pct=Math.min(100,n/LIMIT*100);
-  const w=brushes.filter(b=>b.isWorld).length, e=n-w, d=brushes.filter(b=>b.disp).length;
+  const w=brushes.filter(b=>b.isWorld).length, e=n-w;
   const col=n>LIMIT?'#e03131':n>LIMIT*.9?'#f08c00':'var(--acc)';
-  $('budget').innerHTML=`<b style="color:var(--text);font-size:18px">${n.toLocaleString()}</b> / ${LIMIT} (${pct.toFixed(0)}%)<br>world ${w} · entity ${e} · displacement ${d}`;
+  $('budget').innerHTML=`<b style="color:var(--text);font-size:18px">${n.toLocaleString()}</b> / ${LIMIT} (${pct.toFixed(0)}%)<br>world ${w} · entity ${e} · displacements excluded`;
   $('bfill').style.width=pct+'%'; $('bfill').style.background=col;
   const cls={}; brushes.forEach(b=>cls[b.cls]=(cls[b.cls]||0)+1);
   clsKeys=Object.entries(cls).sort((a,b)=>b[1]-a[1]);
@@ -180,7 +179,6 @@ function buildGrid(size){
 function pass(b){
   if(b.isWorld?!$('fw').checked:!$('fe').checked) return false;
   if(hidden.has(b.cls)) return false;
-  if($('fd').checked&&!b.disp) return false;
   const md=+$('fmax').value; return !(md>0&&b.dim>md);
 }
 function rebuild(){
@@ -236,7 +234,7 @@ function showSel(c){
   selList=shown.filter(b=>fz(b.c[0]/s)===c.ix&&fz(b.c[1]/s)===c.iy&&(flat||fz(b.c[2]/s)===c.iz)).sort((a,b)=>a.dim-b.dim);
   const z0=flat?izMin*s:c.iz*s, box={mn:[c.ix*s,c.iy*s,z0],mx:[(c.ix+1)*s,(c.iy+1)*s,flat?z0+s*.1:z0+s]};
   selGroup.add(lines([box],0xffffff,1)); if(selList.length) selGroup.add(lines(selList,0xffd43b,1));
-  $('sel').innerHTML=`<div>Cell (${c.ix*s}, ${c.iy*s}${flat?'':', '+c.iz*s}) · ${selList.length} brushes</div><div style="max-height:220px;overflow:auto;margin-top:4px"><table><tr><td><b>Brush ID</b></td><td><b>Class</b></td><td><b>Size</b></td></tr>${selList.slice(0,300).map(b=>`<tr><td>${b.id}</td><td>${esc(b.cls)}</td><td>${Math.round(b.dim)}u${b.disp?' disp':''}</td></tr>`).join('')}</table></div>${selList.length>300?'<div>…more, use Copy IDs</div>':''}`;
+  $('sel').innerHTML=`<div>Cell (${c.ix*s}, ${c.iy*s}${flat?'':', '+c.iz*s}) · ${selList.length} brushes</div><div style="max-height:220px;overflow:auto;margin-top:4px"><table><tr><td><b>Brush ID</b></td><td><b>Class</b></td><td><b>Size</b></td></tr>${selList.slice(0,300).map(b=>`<tr><td>${b.id}</td><td>${esc(b.cls)}</td><td>${Math.round(b.dim)}u</td></tr>`).join('')}</table></div>${selList.length>300?'<div>…more, use Copy IDs</div>':''}`;
 }
 $('selcopy').onclick=()=>{
   const t=selList.map(b=>b.id).join(' '); if(!t) return;
@@ -286,7 +284,7 @@ $('cells').addEventListener('click',e=>{
   const t=new THREE.Vector3((c.ix+.5)*s,(c.iy+.5)*s,flat?izMin*s:(c.iz+.5)*s);
   flyTo(t,s); showSel(c);
 });
-['cell','fw','fe','fd','fmax','fmin','fop','flog','fcol','fz','fol'].forEach(id=>$(id).addEventListener('input',()=>{ if(id==='fop'&&mesh) mesh.material.opacity=+$('fop').value/100; else rebuild(); }));
+['cell','fw','fe','fmax','fmin','fop','flog','fcol','fz','fol'].forEach(id=>$(id).addEventListener('input',()=>{ if(id==='fop'&&mesh) mesh.material.opacity=+$('fop').value/100; else rebuild(); }));
 
 $('classes').addEventListener('change',e=>{const i=e.target.dataset.i; if(i===undefined) return; const k=clsKeys[+i][0]; if(e.target.checked) hidden.delete(k); else hidden.add(k); rebuild();});
 $('classes').addEventListener('click',e=>{const i=e.target.dataset.only; if(i===undefined) return; e.preventDefault(); hidden=new Set(clsKeys.map(x=>x[0])); hidden.delete(clsKeys[+i][0]); stats(); rebuild();});
