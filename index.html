@@ -135,7 +135,7 @@ function stats(){
   const n=brushes.length, pct=Math.min(100,n/LIMIT*100);
   const w=brushes.filter(b=>b.isWorld).length, e=n-w;
   const col=n>LIMIT?'#e03131':n>LIMIT*.9?'#f08c00':'var(--acc)';
-  $('budget').innerHTML=`<b style="color:var(--text);font-size:18px">${n.toLocaleString()}</b> / ${LIMIT} (${pct.toFixed(0)}%)<br>world ${w} · entity ${e} · displacements excluded`;
+  $('budget').innerHTML=`<b style="color:var(--text);font-size:18px">${n.toLocaleString()}</b> / ${LIMIT} (${pct.toFixed(0)}%)<br>world ${w} · entity ${e}`;
   $('bfill').style.width=pct+'%'; $('bfill').style.background=col;
   const cls={}; brushes.forEach(b=>cls[b.cls]=(cls[b.cls]||0)+1);
   clsKeys=Object.entries(cls).sort((a,b)=>b[1]-a[1]);
