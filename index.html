@@ -65,6 +65,7 @@ tr.click:hover{background:#000080;color:#fff}
   <label>Color by <select id="fcol"><option value="d">Density</option><option value="c">Entity class</option></select></label>
   <label>Z layer <input type="range" id="fz" min="0" max="0" value="0"><span id="fzv">All</span></label>
   <label><span>Outline all brushes</span><input type="checkbox" id="fol"></label>
+  <label><span>Isolate selected cell</span><input type="checkbox" id="fiso" checked></label>
   <div style="display:flex;gap:6px;margin-top:6px"><button class="mini" id="v3">3D view</button><button class="mini" id="v2">Top-down view</button></div>
 
   <h2>Selected cell <button class="mini" id="selcopy" style="float:right">Copy IDs</button><button class="mini" id="selcoord" style="float:right;margin-right:6px">Copy coords</button></h2>
@@ -278,12 +279,13 @@ function rebuild(){
   const keep=selCell&&cellList.find(c=>c.ix===selCell.ix&&c.iy===selCell.iy&&(selFlat!==flat||flat||c.iz===selCell.iz));
   showSel(keep||null);
 }
+const iso=()=>selCell&&$('fiso').checked;
 function applyIso(){
-  if(olLines) olLines.visible=!selCell;
+  if(olLines) olLines.visible=!iso();
   if(!mesh) return;
   const s=curSize, m=new THREE.Matrix4(), q=new THREE.Quaternion(), one=new THREE.Vector3(1,1,1), tiny=new THREE.Vector3(1e-4,1e-4,1e-4);
   cellList.forEach((c,i)=>{
-    m.compose(new THREE.Vector3((c.ix+.5)*s,(c.iy+.5)*s,flat?izMin*s:(c.iz+.5)*s),q,(!selCell||c===selCell)?one:tiny);
+    m.compose(new THREE.Vector3((c.ix+.5)*s,(c.iy+.5)*s,flat?izMin*s:(c.iz+.5)*s),q,(!iso()||c===selCell)?one:tiny);
     mesh.setMatrixAt(i,m);
   });
   mesh.instanceMatrix.needsUpdate=true;
@@ -293,7 +295,7 @@ function rebuildGeo(){
   if($('fvm').value==='h'||!cellList.length) return;
   const s=curSize;
   let vis;
-  if(selCell) vis=selList;
+  if(iso()) vis=selList;
   else {
     const keys=new Set(cellList.map(c=>c.ix+','+c.iy+','+c.iz));
     vis=shown.filter(b=>keys.has(Math.floor(b.c[0]/s)+','+Math.floor(b.c[1]/s)+','+(flat?0:Math.floor(b.c[2]/s))));
@@ -332,6 +334,7 @@ function setView(v){
   controls.update(); rebuild();
   if(selCell) flyTo(new THREE.Vector3((selCell.ix+.5)*curSize,(selCell.iy+.5)*curSize,flat?izMin*curSize:(selCell.iz+.5)*curSize),curSize);
 }
+$('fiso').addEventListener('input',()=>{ applyIso(); rebuildGeo(); });
 $('v3').onclick=()=>setView(false); $('v2').onclick=()=>setView(true);
 const ray=new THREE.Raycaster(), mouse=new THREE.Vector2();
 function pick(e){
@@ -364,7 +367,7 @@ canvas.addEventListener('pointerdown',e=>down=[e.clientX,e.clientY]);
 canvas.addEventListener('pointerup',e=>{
   if(!down||Math.hypot(e.clientX-down[0],e.clientY-down[1])>4) return;
   let i=pick(e);
-  if(i<0&&selCell){ const g=[geoMesh,trigMesh].filter(Boolean); if(g.length&&ray.intersectObjects(g).length) i=cellList.indexOf(selCell); }
+  if(i<0&&iso()){ const g=[geoMesh,trigMesh].filter(Boolean); if(g.length&&ray.intersectObjects(g).length) i=cellList.indexOf(selCell); }
   showSel(i<0?null:cellList[i]);
 });
 $('cells').addEventListener('click',e=>{
